@@ -5,6 +5,6 @@ mod cookie;
 mod cookie_lexer;
 mod linked_list;
 
-pub use cookie::{Cookie, Error};
-pub(crate) use cookie_lexer::{CookieLexer, CookieLexerError, CookieToken};
-pub(crate) use linked_list::LinkedList;
+pub use crate::cookie::{Cookie, Error};
+pub(crate) use crate::cookie_lexer::{CookieLexer, CookieLexerError, CookieToken};
+pub(crate) use crate::linked_list::LinkedList;
