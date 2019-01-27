@@ -10,7 +10,7 @@ Low-level [RFC 6265](https://tools.ietf.org/html/rfc6265.html) compatible cookie
 ## Usage Example
 
 ```rust
-use basic_cookies::Cookie;
+use basic_cookies::from_user_agent::Cookie;
 
 let parsed_cookies = Cookie::parse("cookie1=value1; cookie2=value2").unwrap();
 

@@ -1,4 +1,5 @@
-use super::{lalrpop_util, CookieLexer, CookieLexerError, CookieToken};
+use crate::lalrpop_util;
+use super::{CookieLexer, CookieLexerError, CookieToken};
 use std::fmt::{Display, Error as FormatterError, Formatter};
 
 const BASIC_COOKIE_ERROR_DESCRIPTION: &'static str = "Cookie Parsing Error";
@@ -6,7 +7,7 @@ const INTERNAL_ERROR_DESCRIPTION: &'static str = "Internal Error";
 const PARSE_ERROR_DESCRIPTION: &'static str = "Parse Error";
 
 #[allow(dead_code)]
-lalrpop_mod!(cookie_grammar);
+lalrpop_mod!(cookie_grammar, "/from_user_agent/cookie_grammar.rs");
 
 #[derive(Debug)]
 pub struct Cookie<'a> {
@@ -20,7 +21,7 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::Cookie;
+    /// use basic_cookies::from_user_agent::Cookie;
     ///
     /// let parsed_cookies = Cookie::parse("cookie1=value1; cookie2=value2").unwrap();
     ///
@@ -46,7 +47,7 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::Cookie;
+    /// use basic_cookies::from_user_agent::Cookie;
     ///
     /// let parsed_cookies = Cookie::parse("name=value").unwrap();
     /// assert_eq!("name", parsed_cookies[0].get_name());
@@ -60,7 +61,7 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::Cookie;
+    /// use basic_cookies::from_user_agent::Cookie;
     ///
     /// let parsed_cookies = Cookie::parse("name=value").unwrap();
     /// assert_eq!("value", parsed_cookies[0].get_value());

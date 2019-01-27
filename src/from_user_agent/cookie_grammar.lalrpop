@@ -1,6 +1,7 @@
-use crate::{CookieLexerError, CookieToken, LinkedList};
-use crate::cookie::terminals::Cookie;
-use crate::cookie::nonterminals::NonTerminalSpan;
+use crate::{LinkedList};
+use crate::from_user_agent::{CookieLexerError, CookieToken};
+use crate::from_user_agent::cookie::terminals::Cookie;
+use crate::from_user_agent::cookie::nonterminals::NonTerminalSpan;
 
 grammar;
 
