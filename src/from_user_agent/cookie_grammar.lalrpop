@@ -1,20 +1,19 @@
-use crate::{LinkedList};
 use crate::from_user_agent::{CookieLexerError, CookieToken};
 use crate::from_user_agent::cookie::terminals::Cookie;
 use crate::from_user_agent::cookie::nonterminals::NonTerminalSpan;
 
 grammar;
 
-pub(crate) Cookies: LinkedList<Cookie> = {
+pub(crate) Cookies: Vec<Cookie> = {
     <CookieString> => <>,
     OWS <CookieString> => <>,
     <CookieString> OWS => <>,
     OWS <CookieString> OWS => <>
 }
 
-CookieString: LinkedList<Cookie> = {
-    <c: Cookie> => LinkedList::new(c),
-    <cv: CookieString> ";" " " <c: Cookie> => cv.insert(c)
+CookieString: Vec<Cookie> = {
+    <c: Cookie> => vec![c],
+    <cv: CookieString> ";" " " <c: Cookie> => { let mut owned_cv = cv; owned_cv.push(c); owned_cv }
 }
 
 Cookie: Cookie = {

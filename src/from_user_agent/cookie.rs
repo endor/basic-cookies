@@ -1,5 +1,5 @@
-use crate::lalrpop_util;
 use super::{CookieLexer, CookieLexerError, CookieToken};
+use crate::lalrpop_util;
 use std::fmt::{Display, Error as FormatterError, Formatter};
 
 const BASIC_COOKIE_ERROR_DESCRIPTION: &'static str = "Cookie Parsing Error";
@@ -35,9 +35,7 @@ impl<'a> Cookie<'a> {
         Ok(cookie_grammar::CookiesParser::new()
             .parse(CookieLexer::new(input))
             .map_err(ParseError::from_lalrpop_parse_error_to_error)?
-            .clone_to_vec()
             .iter()
-            .rev()
             .map(|tok| tok.with_str(input))
             .collect::<Result<Vec<Cookie>, Error>>()?)
     }
