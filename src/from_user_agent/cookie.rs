@@ -14,7 +14,7 @@ const ENCODING_ERROR_COOKIE_OCTET_CLASS: &'static str = "cookie-octet";
 lalrpop_mod!(cookie_grammar, "/from_user_agent/cookie_grammar.rs");
 
 /// A cookie sent from a user agent to a server, as described in [Section 4.2 of RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2).
-/// 
+///
 /// # Examples
 /// ```
 /// use basic_cookies::from_user_agent::Cookie;
@@ -23,7 +23,7 @@ lalrpop_mod!(cookie_grammar, "/from_user_agent/cookie_grammar.rs");
 /// let new_cookie_1 = Cookie::new("key1", "value1");
 /// let cookie_string = Cookie::emit(vec![new_cookie_0, new_cookie_1]).unwrap();
 /// assert_eq!("key0=value0; key1=value1", cookie_string);
-/// 
+///
 /// let parsed_cookies = Cookie::parse(&cookie_string).unwrap();
 /// assert_eq!("key0", parsed_cookies[0].get_name());
 /// assert_eq!("value0", parsed_cookies[0].get_value());
@@ -112,7 +112,7 @@ impl<'a> Cookie<'a> {
     ///
     /// ```
     /// use basic_cookies::from_user_agent::Cookie;
-    /// 
+    ///
     /// let cookie_0 = Cookie::new("key0", "value0");
     /// let cookie_1 = Cookie::new("key1", "value1");
     /// let cookie_string = Cookie::emit(vec![cookie_0, cookie_1]).unwrap();
