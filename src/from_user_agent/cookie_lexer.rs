@@ -174,7 +174,7 @@ impl<'input> CookieLexer<'input> {
         let mut token_end_idx = 0_usize;
 
         for (_, cursor_char) in self.char_indices[self.cursor..].iter() {
-            match CookieLexer::char_token_class(*cursor_char) {
+            match CharTokenClass::get_class(*cursor_char) {
                 CharTokenClass::TokenOrCookieOctets => {
                     token_end_idx += cursor_char.len_utf8();
                 }
@@ -208,8 +208,26 @@ impl<'input> CookieLexer<'input> {
             None
         }
     }
+}
 
-    fn char_token_class(c: char) -> CharTokenClass {
+impl<'input> Display for CookieLexer<'input> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
+        f.write_fmt(format_args!(
+            "Cookie Lexer, cursor at position {}.",
+            self.cursor
+        ))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum CharTokenClass {
+    None,
+    CookieOctets,
+    TokenOrCookieOctets,
+}
+
+impl CharTokenClass {
+    fn get_class(c: char) -> CharTokenClass {
         match c {
             '\x21'
             | '\x23'...'\x27'
@@ -235,21 +253,17 @@ impl<'input> CookieLexer<'input> {
             _ => CharTokenClass::None,
         }
     }
-}
 
-impl<'input> Display for CookieLexer<'input> {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
-        f.write_fmt(format_args!(
-            "Cookie Lexer, cursor at position {}.",
-            self.cursor
-        ))
+    pub fn is_token_char(c: char) -> bool {
+        CharTokenClass::get_class(c) == CharTokenClass::TokenOrCookieOctets
     }
-}
 
-enum CharTokenClass {
-    None,
-    CookieOctets,
-    TokenOrCookieOctets,
+    pub fn is_cookie_octet(c: char) -> bool {
+        match CharTokenClass::get_class(c) {
+            CharTokenClass::TokenOrCookieOctets | CharTokenClass::CookieOctets => true,
+            _ => false,
+        }
+    }
 }
 
 impl<'input> Iterator for CookieLexer<'input> {
@@ -451,6 +465,153 @@ mod tests {
             );
 
             assert_eq!(Some(Ok((2, CookieToken::Space, 3))), lexer.get_next_token());
+        }
+    }
+
+    #[cfg(test)]
+    mod char_token_class {
+        use super::super::CharTokenClass;
+
+        #[test]
+        fn x00() {
+            assert_eq!(CharTokenClass::None, CharTokenClass::get_class('\x00'));
+        }
+
+        #[test]
+        fn x21() {
+            assert_eq!(
+                CharTokenClass::TokenOrCookieOctets,
+                CharTokenClass::get_class('\x21')
+            );
+        }
+
+        #[test]
+        fn x22() {
+            assert_eq!(CharTokenClass::None, CharTokenClass::get_class('\x22'));
+        }
+
+        #[test]
+        fn x23() {
+            assert_eq!(
+                CharTokenClass::TokenOrCookieOctets,
+                CharTokenClass::get_class('\x23')
+            );
+        }
+
+        #[test]
+        fn x28() {
+            assert_eq!(
+                CharTokenClass::CookieOctets,
+                CharTokenClass::get_class('\x28')
+            );
+        }
+
+        #[test]
+        fn x3d() {
+            assert_eq!(CharTokenClass::None, CharTokenClass::get_class('\x3d'));
+        }
+
+        #[test]
+        fn x3e() {
+            assert_eq!(
+                CharTokenClass::CookieOctets,
+                CharTokenClass::get_class('\x3e')
+            );
+        }
+
+        #[test]
+        fn x7f() {
+            assert_eq!(CharTokenClass::None, CharTokenClass::get_class('\x7f'));
+        }
+
+        #[cfg(test)]
+        mod is_token_char {
+            use super::super::super::CharTokenClass;
+
+            #[test]
+            fn x00() {
+                assert_eq!(false, CharTokenClass::is_token_char('\x00'));
+            }
+
+            #[test]
+            fn x21() {
+                assert_eq!(true, CharTokenClass::is_token_char('\x21'));
+            }
+
+            #[test]
+            fn x22() {
+                assert_eq!(false, CharTokenClass::is_token_char('\x22'));
+            }
+
+            #[test]
+            fn x23() {
+                assert_eq!(true, CharTokenClass::is_token_char('\x23'));
+            }
+
+            #[test]
+            fn x28() {
+                assert_eq!(false, CharTokenClass::is_token_char('\x28'));
+            }
+
+            #[test]
+            fn x3d() {
+                assert_eq!(false, CharTokenClass::is_token_char('\x3d'));
+            }
+
+            #[test]
+            fn x3e() {
+                assert_eq!(false, CharTokenClass::is_token_char('\x3e'));
+            }
+
+            #[test]
+            fn x7f() {
+                assert_eq!(false, CharTokenClass::is_token_char('\x7f'));
+            }
+        }
+
+        #[cfg(test)]
+        mod is_cookie_octet {
+            use super::super::super::CharTokenClass;
+
+            #[test]
+            fn x00() {
+                assert_eq!(false, CharTokenClass::is_cookie_octet('\x00'));
+            }
+
+            #[test]
+            fn x21() {
+                assert_eq!(true, CharTokenClass::is_cookie_octet('\x21'));
+            }
+
+            #[test]
+            fn x22() {
+                assert_eq!(false, CharTokenClass::is_cookie_octet('\x22'));
+            }
+
+            #[test]
+            fn x23() {
+                assert_eq!(true, CharTokenClass::is_cookie_octet('\x23'));
+            }
+
+            #[test]
+            fn x28() {
+                assert_eq!(true, CharTokenClass::is_cookie_octet('\x28'));
+            }
+
+            #[test]
+            fn x3d() {
+                assert_eq!(false, CharTokenClass::is_cookie_octet('\x3d'));
+            }
+
+            #[test]
+            fn x3e() {
+                assert_eq!(true, CharTokenClass::is_cookie_octet('\x3e'));
+            }
+
+            #[test]
+            fn x7f() {
+                assert_eq!(false, CharTokenClass::is_cookie_octet('\x7f'));
+            }
         }
     }
 }
