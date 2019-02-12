@@ -14,7 +14,7 @@ lalrpop_mod!(cookie_grammar, "/user_agent_cookie_grammar.rs");
 ///
 /// let new_cookie_0 = UserAgentCookie::new("key0", "value0");
 /// let new_cookie_1 = UserAgentCookie::new("key1", "value1");
-/// let cookie_string = UserAgentCookie::emit_all(vec![new_cookie_0, new_cookie_1]).unwrap();
+/// let cookie_string = UserAgentCookie::emit_all(&vec![new_cookie_0, new_cookie_1]).unwrap();
 /// assert_eq!("key0=value0; key1=value1", &cookie_string);
 ///
 /// let parsed_cookies = UserAgentCookie::parse(&cookie_string).unwrap();
@@ -23,14 +23,14 @@ lalrpop_mod!(cookie_grammar, "/user_agent_cookie_grammar.rs");
 /// assert_eq!("key1", parsed_cookies[1].get_name());
 /// assert_eq!("value1", parsed_cookies[1].get_value());
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct UserAgentCookie<'a> {
     name: &'a str,
     value: &'a str,
 }
 
 impl<'a> UserAgentCookie<'a> {
-    /// Creates a new cookie suitable to be sent from a user agent to a server from a cookie name string and a cookie value string.
+    /// Creates a new cookie that is suitable to be sent from a user agent to a server.
     ///
     /// # Examples
     /// ```
@@ -98,9 +98,27 @@ impl<'a> UserAgentCookie<'a> {
     pub fn get_value(&self) -> &'a str {
         self.value
     }
+}
 
-    /// Emits an [RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2.1) a compliant cookie string comprised of
-    /// multiple cookies, suitable to be sent from a user agent to a server.
+impl<'b, 'a: 'b> UserAgentCookie<'a> {
+    /// Emits an [RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2.1) compliant cookie string that comprised of
+    /// this cookie only and is suitable to be sent from a user agent to a server.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use basic_cookies::UserAgentCookie;
+    ///
+    /// let cookie = UserAgentCookie::new("key", "value");
+    /// let cookie_string = cookie.emit().unwrap();
+    /// assert_eq!("key=value", cookie_string);
+    /// ```
+    pub fn emit(&'b self) -> Result<String, EmitCookieError<'a>> {
+        UserAgentCookie::emit_all(&[self.clone()])
+    }
+
+    /// Emits an [RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2.1) compliant cookie string that is comprised of
+    /// multiple cookies and is suitable to be sent from a user agent to a server.
     ///
     /// # Examples
     ///
@@ -109,10 +127,10 @@ impl<'a> UserAgentCookie<'a> {
     ///
     /// let cookie_0 = UserAgentCookie::new("key0", "value0");
     /// let cookie_1 = UserAgentCookie::new("key1", "value1");
-    /// let cookie_string = UserAgentCookie::emit_all(vec![cookie_0, cookie_1]).unwrap();
+    /// let cookie_string = UserAgentCookie::emit_all(&vec![cookie_0, cookie_1]).unwrap();
     /// assert_eq!("key0=value0; key1=value1", cookie_string);
     /// ```
-    pub fn emit_all<T: IntoIterator<Item = UserAgentCookie<'a>>>(
+    pub fn emit_all<T: IntoIterator<Item = &'b UserAgentCookie<'a>>>(
         cookies: T,
     ) -> Result<String, EmitCookieError<'a>> {
         let mut result = String::new();
@@ -517,15 +535,39 @@ mod tests {
     }
 
     #[test]
+    fn emit_valid() {
+        assert_eq!(
+            "z01=x987",
+            UserAgentCookie::new("z01", "x987").emit().unwrap()
+        );
+    }
+
+    #[test]
+    fn emit_invalid_token() {
+        assert!(
+            UserAgentCookie::new("[abc]", "123").emit().is_err(),
+            "EncodingError expected but result was successful."
+        );
+    }
+
+    #[test]
+    fn emit_invalid_cookie_value() {
+        assert!(
+            UserAgentCookie::new("test", "\"123\"").emit().is_err(),
+            "EncodingError expected but result was successful."
+        );
+    }
+
+    #[test]
     fn emit_all_empty() {
-        assert_eq!("", UserAgentCookie::emit_all(vec![]).unwrap());
+        assert_eq!("", UserAgentCookie::emit_all(&vec![]).unwrap());
     }
 
     #[test]
     fn emit_all_single() {
         assert_eq!(
             "testkey=testvalue",
-            UserAgentCookie::emit_all(vec![UserAgentCookie::new("testkey", "testvalue")]).unwrap()
+            UserAgentCookie::emit_all(&vec![UserAgentCookie::new("testkey", "testvalue")]).unwrap()
         );
     }
 
@@ -533,7 +575,7 @@ mod tests {
     fn emit_all_two() {
         assert_eq!(
             "abc=123; hello=world",
-            UserAgentCookie::emit_all(vec![
+            UserAgentCookie::emit_all(&vec![
                 UserAgentCookie::new("abc", "123"),
                 UserAgentCookie::new("hello", "world")
             ])
@@ -544,7 +586,7 @@ mod tests {
     #[test]
     fn emit_all_invalid_token() {
         assert!(
-            UserAgentCookie::emit_all(vec![UserAgentCookie::new("[abc]", "123")]).is_err(),
+            UserAgentCookie::emit_all(&vec![UserAgentCookie::new("[abc]", "123")]).is_err(),
             "EncodingError expected but result was successful."
         );
     }
@@ -552,7 +594,7 @@ mod tests {
     #[test]
     fn emit_all_invalid_cookie_value() {
         assert!(
-            UserAgentCookie::emit_all(vec![UserAgentCookie {
+            UserAgentCookie::emit_all(&vec![UserAgentCookie {
                 name: "abc",
                 value: "\"123\""
             }])
