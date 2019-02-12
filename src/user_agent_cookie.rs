@@ -1,54 +1,47 @@
-use super::{CharTokenClass, CookieLexer, CookieLexerError, CookieToken};
-use crate::lalrpop_util;
-use std::fmt::{Display, Error as FormatterError, Formatter};
-
-const BASIC_COOKIE_ERROR_DESCRIPTION: &'static str = "Cookie Parsing Error";
-const INTERNAL_ERROR_DESCRIPTION: &'static str = "Internal Error";
-const PARSE_ERROR_DESCRIPTION: &'static str = "Parse Error";
-const ENCODING_ERROR_DESCRIPTION: &'static str = "Encoding Error";
-
-const ENCODING_ERROR_TOKEN_CLASS: &'static str = "token";
-const ENCODING_ERROR_COOKIE_OCTET_CLASS: &'static str = "cookie-octet";
+use crate::{
+    CharTokenClass, CookieLexer, EmitCookieError, EncodingError, EncodingErrorExpectedClass,
+    ParseCookieError,
+};
 
 #[allow(dead_code)]
-lalrpop_mod!(cookie_grammar, "/from_user_agent/cookie_grammar.rs");
+lalrpop_mod!(cookie_grammar, "/user_agent_cookie_grammar.rs");
 
-/// A cookie sent from a user agent to a server, as described in [Section 4.2 of RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2).
+/// A cookie suitable to be sent from a user agent to a server, as described in [Section 4.2 of RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2).
 ///
 /// # Examples
 /// ```
-/// use basic_cookies::from_user_agent::Cookie;
+/// use basic_cookies::UserAgentCookie;
 ///
-/// let new_cookie_0 = Cookie::new("key0", "value0");
-/// let new_cookie_1 = Cookie::new("key1", "value1");
-/// let cookie_string = Cookie::emit(vec![new_cookie_0, new_cookie_1]).unwrap();
-/// assert_eq!("key0=value0; key1=value1", cookie_string);
+/// let new_cookie_0 = UserAgentCookie::new("key0", "value0");
+/// let new_cookie_1 = UserAgentCookie::new("key1", "value1");
+/// let cookie_string = UserAgentCookie::emit(vec![new_cookie_0, new_cookie_1]).unwrap();
+/// assert_eq!("key0=value0; key1=value1", &cookie_string);
 ///
-/// let parsed_cookies = Cookie::parse(&cookie_string).unwrap();
+/// let parsed_cookies = UserAgentCookie::parse(&cookie_string).unwrap();
 /// assert_eq!("key0", parsed_cookies[0].get_name());
 /// assert_eq!("value0", parsed_cookies[0].get_value());
 /// assert_eq!("key1", parsed_cookies[1].get_name());
 /// assert_eq!("value1", parsed_cookies[1].get_value());
 /// ```
 #[derive(Debug)]
-pub struct Cookie<'a> {
+pub struct UserAgentCookie<'a> {
     name: &'a str,
     value: &'a str,
 }
 
-impl<'a> Cookie<'a> {
-    /// Creates a new cookie from a cookie name string and a cookie value string.
+impl<'a> UserAgentCookie<'a> {
+    /// Creates a new cookie suitable to be sent from a user agent to a server from a cookie name string and a cookie value string.
     ///
     /// # Examples
     /// ```
-    /// use basic_cookies::from_user_agent::Cookie;
+    /// use basic_cookies::UserAgentCookie;
     ///
-    /// let new_cookie = Cookie::new("name1", "value1");
+    /// let new_cookie = UserAgentCookie::new("name1", "value1");
     /// assert_eq!("name1", new_cookie.get_name());
     /// assert_eq!("value1", new_cookie.get_value());
     /// ```
-    pub fn new(name: &'a str, value: &'a str) -> Cookie<'a> {
-        Cookie {
+    pub fn new(name: &'a str, value: &'a str) -> UserAgentCookie<'a> {
+        UserAgentCookie {
             name: name,
             value: value,
         }
@@ -59,9 +52,9 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::from_user_agent::Cookie;
+    /// use basic_cookies::UserAgentCookie;
     ///
-    /// let parsed_cookies = Cookie::parse("cookie1=value1; cookie2=value2").unwrap();
+    /// let parsed_cookies = UserAgentCookie::parse("cookie1=value1; cookie2=value2").unwrap();
     ///
     /// assert_eq!("cookie1", parsed_cookies[0].get_name());
     /// assert_eq!("value1", parsed_cookies[0].get_value());
@@ -69,13 +62,13 @@ impl<'a> Cookie<'a> {
     /// assert_eq!("cookie2", parsed_cookies[1].get_name());
     /// assert_eq!("value2", parsed_cookies[1].get_value());
     /// ```
-    pub fn parse(input: &'a str) -> Result<Vec<Cookie<'a>>, ParseError> {
+    pub fn parse(input: &'a str) -> Result<Vec<UserAgentCookie<'a>>, ParseCookieError> {
         Ok(cookie_grammar::CookiesParser::new()
             .parse(CookieLexer::new(input))
-            .map_err(ParserError::from_lalrpop_parse_error_to_error)?
+            .map_err(ParseCookieError::from_lalrpop_error)?
             .iter()
             .map(|tok| tok.with_str(input))
-            .collect::<Result<Vec<Cookie>, ParseError>>()?)
+            .collect::<Result<Vec<UserAgentCookie>, ParseCookieError>>()?)
     }
 
     /// Gets the name of the cookie.
@@ -83,9 +76,9 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::from_user_agent::Cookie;
+    /// use basic_cookies::UserAgentCookie;
     ///
-    /// let parsed_cookies = Cookie::parse("name=value").unwrap();
+    /// let parsed_cookies = UserAgentCookie::parse("name=value").unwrap();
     /// assert_eq!("name", parsed_cookies[0].get_name());
     /// ```
     pub fn get_name(&self) -> &'a str {
@@ -97,9 +90,9 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::from_user_agent::Cookie;
+    /// use basic_cookies::UserAgentCookie;
     ///
-    /// let parsed_cookies = Cookie::parse("name=value").unwrap();
+    /// let parsed_cookies = UserAgentCookie::parse("name=value").unwrap();
     /// assert_eq!("value", parsed_cookies[0].get_value());
     /// ```
     pub fn get_value(&self) -> &'a str {
@@ -111,14 +104,16 @@ impl<'a> Cookie<'a> {
     /// # Examples
     ///
     /// ```
-    /// use basic_cookies::from_user_agent::Cookie;
+    /// use basic_cookies::UserAgentCookie;
     ///
-    /// let cookie_0 = Cookie::new("key0", "value0");
-    /// let cookie_1 = Cookie::new("key1", "value1");
-    /// let cookie_string = Cookie::emit(vec![cookie_0, cookie_1]).unwrap();
+    /// let cookie_0 = UserAgentCookie::new("key0", "value0");
+    /// let cookie_1 = UserAgentCookie::new("key1", "value1");
+    /// let cookie_string = UserAgentCookie::emit(vec![cookie_0, cookie_1]).unwrap();
     /// assert_eq!("key0=value0; key1=value1", cookie_string);
     /// ```
-    pub fn emit<T: IntoIterator<Item = Cookie<'a>>>(cookies: T) -> Result<String, EmitError> {
+    pub fn emit<T: IntoIterator<Item = UserAgentCookie<'a>>>(
+        cookies: T,
+    ) -> Result<String, EmitCookieError<'a>> {
         let mut result = String::new();
         let mut is_first = true;
 
@@ -130,16 +125,16 @@ impl<'a> Cookie<'a> {
             }
 
             if !is_str_all_tokens(cookie.name) {
-                return Err(EmitError::EncodingError(EncodingError::new(
-                    cookie.name.to_owned(),
-                    ENCODING_ERROR_TOKEN_CLASS,
+                return Err(EmitCookieError::EncodingError(EncodingError::new(
+                    cookie.name,
+                    EncodingErrorExpectedClass::Token,
                 )));
             }
 
             if !is_str_all_cookie_octets(cookie.value) {
-                return Err(EmitError::EncodingError(EncodingError::new(
-                    cookie.value.to_owned(),
-                    ENCODING_ERROR_COOKIE_OCTET_CLASS,
+                return Err(EmitCookieError::EncodingError(EncodingError::new(
+                    cookie.value,
+                    EncodingErrorExpectedClass::Token,
                 )));
             }
 
@@ -149,157 +144,6 @@ impl<'a> Cookie<'a> {
         }
 
         Ok(result)
-    }
-}
-
-#[derive(Debug)]
-pub enum ParseError {
-    InternalError(InternalError),
-    ParserError(ParserError),
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
-        f.write_str(BASIC_COOKIE_ERROR_DESCRIPTION)?;
-        f.write_str(": ")?;
-        match self {
-            ParseError::InternalError(err) => err.fmt(f),
-            ParseError::ParserError(err) => err.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {
-    fn description(&self) -> &str {
-        BASIC_COOKIE_ERROR_DESCRIPTION
-    }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        self.source()
-    }
-
-    fn source(&self) -> Option<&(std::error::Error + 'static)> {
-        match self {
-            ParseError::InternalError(err) => Some(err),
-            ParseError::ParserError(err) => Some(err),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum EmitError {
-    InternalError(InternalError),
-    EncodingError(EncodingError),
-}
-
-#[derive(Debug)]
-pub struct InternalError(InternalErrorKind);
-
-impl InternalError {
-    pub(crate) fn to_error(self) -> ParseError {
-        ParseError::InternalError(self)
-    }
-}
-
-impl Display for InternalError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
-        f.write_str(INTERNAL_ERROR_DESCRIPTION)
-    }
-}
-
-impl std::error::Error for InternalError {
-    fn description(&self) -> &str {
-        INTERNAL_ERROR_DESCRIPTION
-    }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        None
-    }
-
-    fn source(&self) -> Option<&(std::error::Error + 'static)> {
-        None
-    }
-}
-
-#[derive(Debug)]
-enum InternalErrorKind {
-    NonTerminalIndexBeyondBoundaries,
-}
-
-type LalrpopError = lalrpop_util::ParseError<usize, CookieToken, CookieLexerError>;
-
-#[derive(Debug)]
-pub struct ParserError {
-    lalrpop_error: LalrpopError,
-}
-
-impl ParserError {
-    pub(crate) fn from_lalrpop_parse_error_to_error(src: LalrpopError) -> ParseError {
-        ParserError { lalrpop_error: src }.to_error()
-    }
-
-    fn to_error(self) -> ParseError {
-        ParseError::ParserError(self)
-    }
-}
-
-impl Display for ParserError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
-        f.write_str(PARSE_ERROR_DESCRIPTION)?;
-        f.write_str(": ")?;
-        self.lalrpop_error.fmt(f)
-    }
-}
-
-impl std::error::Error for ParserError {
-    fn description(&self) -> &str {
-        PARSE_ERROR_DESCRIPTION
-    }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        Some(&self.lalrpop_error)
-    }
-
-    fn source(&self) -> Option<&(std::error::Error + 'static)> {
-        Some(&self.lalrpop_error)
-    }
-}
-
-#[derive(Debug)]
-pub struct EncodingError {
-    value: String,
-    expected_class: &'static str,
-}
-
-impl EncodingError {
-    fn new(value: String, expected_class: &'static str) -> EncodingError {
-        EncodingError {
-            value: value,
-            expected_class: expected_class,
-        }
-    }
-}
-
-impl Display for EncodingError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
-        f.write_fmt(format_args!(
-            "{}, expected character class: {}, value: {}",
-            ENCODING_ERROR_DESCRIPTION, &self.expected_class, &self.value
-        ))
-    }
-}
-
-impl std::error::Error for EncodingError {
-    fn description(&self) -> &str {
-        ENCODING_ERROR_DESCRIPTION
-    }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        None
-    }
-
-    fn source(&self) -> Option<&(std::error::Error + 'static)> {
-        None
     }
 }
 
@@ -313,8 +157,8 @@ fn is_str_all_cookie_octets(val: &str) -> bool {
 
 mod terminals {
     use super::nonterminals::NonTerminalSpan;
-    use super::Cookie as FullyParsedCookie;
-    use super::{InternalError, ParseError};
+    use super::ParseCookieError;
+    use super::UserAgentCookie;
 
     #[derive(Clone, Debug)]
     pub struct Cookie {
@@ -326,17 +170,21 @@ mod terminals {
         pub(super) fn with_str<'a>(
             &self,
             data: &'a str,
-        ) -> Result<FullyParsedCookie<'a>, ParseError> {
-            Ok(FullyParsedCookie::new(
-                self.key.as_str(data).map_err(InternalError::to_error)?,
-                self.value.as_str(data).map_err(InternalError::to_error)?,
+        ) -> Result<UserAgentCookie<'a>, ParseCookieError> {
+            Ok(UserAgentCookie::new(
+                self.key
+                    .as_str(data)
+                    .map_err(ParseCookieError::from_internal_error)?,
+                self.value
+                    .as_str(data)
+                    .map_err(ParseCookieError::from_internal_error)?,
             ))
         }
     }
 }
 
 mod nonterminals {
-    use super::{InternalError, InternalErrorKind};
+    use crate::{InternalError, InternalErrorKind};
 
     #[derive(Clone, Debug)]
     pub struct NonTerminalSpan {
@@ -355,7 +203,7 @@ mod nonterminals {
         pub(crate) fn as_str<'a>(&self, data: &'a str) -> Result<&'a str, InternalError> {
             match data.get(self.start..self.end) {
                 Some(res) => Ok(res),
-                None => Err(InternalError(
+                None => Err(InternalError::new(
                     InternalErrorKind::NonTerminalIndexBeyondBoundaries,
                 )),
             }
@@ -365,17 +213,14 @@ mod nonterminals {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_str_all_cookie_octets, is_str_all_tokens, Cookie};
+    use super::{is_str_all_cookie_octets, is_str_all_tokens, UserAgentCookie};
 
     #[test]
     fn get_name() {
         const COOKIE_KEY: &'static str = "cookie_key";
         const COOKIE_VALUE: &'static str = "cookie_value";
 
-        let cookie = Cookie {
-            name: COOKIE_KEY,
-            value: COOKIE_VALUE,
-        };
+        let cookie = UserAgentCookie::new(COOKIE_KEY, COOKIE_VALUE);
 
         assert_eq!(COOKIE_KEY, cookie.get_name());
     }
@@ -385,10 +230,7 @@ mod tests {
         const COOKIE_KEY: &'static str = "cookie_key";
         const COOKIE_VALUE: &'static str = "cookie_value";
 
-        let cookie = Cookie {
-            name: COOKIE_KEY,
-            value: COOKIE_VALUE,
-        };
+        let cookie = UserAgentCookie::new(COOKIE_KEY, COOKIE_VALUE);
 
         assert_eq!(COOKIE_VALUE, cookie.get_value());
     }
@@ -396,7 +238,7 @@ mod tests {
     #[test]
     fn single_cookie() {
         const COOKIE_STR: &'static str = "test=1234";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -407,7 +249,7 @@ mod tests {
     #[test]
     fn single_cookie_quoted() {
         const COOKIE_STR: &'static str = "quoted_test=\"quotedval\"";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -418,7 +260,7 @@ mod tests {
     #[test]
     fn single_cookie_with_equals_in_value() {
         const COOKIE_STR: &'static str = "test=abc=123";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -429,7 +271,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_before() {
         const COOKIE_STR: &'static str = " \x09 ztest=9876";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -440,7 +282,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_with_single_space_before() {
         const COOKIE_STR: &'static str = " qtest=9878";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -451,7 +293,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_after() {
         const COOKIE_STR: &'static str = "abcde=77766test \x09\x09    ";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -462,7 +304,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_with_single_space_after() {
         const COOKIE_STR: &'static str = "xyzzz=test3 ";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -473,7 +315,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_before_and_after() {
         const COOKIE_STR: &'static str = " \x09 ztest=9876       ";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -484,7 +326,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name() {
         const COOKIE_STR: &'static str = "=nokey";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -495,7 +337,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name_with_ows_before() {
         const COOKIE_STR: &'static str = " =nokey";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -506,7 +348,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_value() {
         const COOKIE_STR: &'static str = "noval=";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -517,7 +359,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_value_with_ows_after() {
         const COOKIE_STR: &'static str = "noval= ";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -528,7 +370,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name_and_val() {
         const COOKIE_STR: &'static str = "=";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -539,7 +381,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name_no_equals() {
         const COOKIE_STR: &'static str = "nokey";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -550,7 +392,7 @@ mod tests {
     #[test]
     fn two_cookies() {
         const COOKIE_STR: &'static str = "test1=01234; test2=testval";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(2, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -565,7 +407,7 @@ mod tests {
     #[test]
     fn three_cookies() {
         const COOKIE_STR: &'static str = "test1=0x1234; test2=test2; third_val=v4lue";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -584,7 +426,7 @@ mod tests {
     #[test]
     fn three_cookies_ows_before() {
         const COOKIE_STR: &'static str = " test1=0x1234; test2=test2; third_val=v4lue";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -603,7 +445,7 @@ mod tests {
     #[test]
     fn three_cookies_ows_after() {
         const COOKIE_STR: &'static str = "test1=0x1234; test2=test2; third_val=v4lue   ";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -622,7 +464,7 @@ mod tests {
     #[test]
     fn three_cookies_ows_before_and_after() {
         const COOKIE_STR: &'static str = "   test1=0x1234; test2=test2; third_val=v4lue ";
-        let parsed_cookies = Cookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -675,14 +517,14 @@ mod tests {
 
     #[test]
     fn emit_empty() {
-        assert_eq!("", Cookie::emit(vec![]).unwrap());
+        assert_eq!("", UserAgentCookie::emit(vec![]).unwrap());
     }
 
     #[test]
     fn emit_single() {
         assert_eq!(
             "testkey=testvalue",
-            Cookie::emit(vec![Cookie::new("testkey", "testvalue")]).unwrap()
+            UserAgentCookie::emit(vec![UserAgentCookie::new("testkey", "testvalue")]).unwrap()
         );
     }
 
@@ -690,9 +532,9 @@ mod tests {
     fn emit_two() {
         assert_eq!(
             "abc=123; hello=world",
-            Cookie::emit(vec![
-                Cookie::new("abc", "123"),
-                Cookie::new("hello", "world")
+            UserAgentCookie::emit(vec![
+                UserAgentCookie::new("abc", "123"),
+                UserAgentCookie::new("hello", "world")
             ])
             .unwrap()
         );
@@ -701,7 +543,7 @@ mod tests {
     #[test]
     fn emit_invalid_token() {
         assert!(
-            Cookie::emit(vec![Cookie::new("[abc]", "123")]).is_err(),
+            UserAgentCookie::emit(vec![UserAgentCookie::new("[abc]", "123")]).is_err(),
             "EncodingError expected but result was successful."
         );
     }
@@ -709,7 +551,7 @@ mod tests {
     #[test]
     fn emit_invalid_cookie_value() {
         assert!(
-            Cookie::emit(vec![Cookie {
+            UserAgentCookie::emit(vec![UserAgentCookie {
                 name: "abc",
                 value: "\"123\""
             }])

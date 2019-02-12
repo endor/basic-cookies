@@ -1,39 +1,5 @@
+use crate::LexerError;
 use std::fmt::{Display, Error as FormatterError, Formatter};
-
-const COOKIE_LEXER_ERROR_DESCRIPTION: &'static str = "Cookie Lexer Error";
-
-#[derive(Debug)]
-pub struct CookieLexerError;
-
-impl PartialEq<CookieLexerError> for CookieLexerError {
-    fn eq(&self, _other: &CookieLexerError) -> bool {
-        false
-    }
-
-    fn ne(&self, _other: &CookieLexerError) -> bool {
-        false
-    }
-}
-
-impl Display for CookieLexerError {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatterError> {
-        f.write_str(COOKIE_LEXER_ERROR_DESCRIPTION)
-    }
-}
-
-impl std::error::Error for CookieLexerError {
-    fn description(&self) -> &str {
-        COOKIE_LEXER_ERROR_DESCRIPTION
-    }
-
-    fn cause(&self) -> Option<&std::error::Error> {
-        None
-    }
-
-    fn source(&self) -> Option<&(std::error::Error + 'static)> {
-        None
-    }
-}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum CookieToken {
@@ -141,7 +107,7 @@ impl<'input> CookieLexer<'input> {
         self.data.get(self.cursor..)
     }
 
-    fn get_next_token(&mut self) -> Option<Result<(usize, CookieToken, usize), CookieLexerError>> {
+    fn get_next_token(&mut self) -> Option<Result<(usize, CookieToken, usize), LexerError>> {
         let cursor_str = match self.substr_at_cursor() {
             Some(val) => val,
             None => return None,
@@ -169,7 +135,7 @@ impl<'input> CookieLexer<'input> {
 
     fn get_next_pattern_token(
         &mut self,
-    ) -> Option<Result<(usize, CookieToken, usize), CookieLexerError>> {
+    ) -> Option<Result<(usize, CookieToken, usize), LexerError>> {
         let mut can_be_token = true;
         let mut token_end_idx = 0_usize;
 
@@ -267,7 +233,7 @@ impl CharTokenClass {
 }
 
 impl<'input> Iterator for CookieLexer<'input> {
-    type Item = Result<(usize, CookieToken, usize), CookieLexerError>;
+    type Item = Result<(usize, CookieToken, usize), LexerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.get_next_token()

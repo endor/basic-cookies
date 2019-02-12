@@ -1,6 +1,6 @@
-use crate::from_user_agent::{CookieLexerError, CookieToken};
-use crate::from_user_agent::cookie::terminals::Cookie;
-use crate::from_user_agent::cookie::nonterminals::NonTerminalSpan;
+use crate::{CookieToken, LexerError};
+use crate::user_agent_cookie::terminals::Cookie;
+use crate::user_agent_cookie::nonterminals::NonTerminalSpan;
 
 grammar;
 
@@ -81,7 +81,7 @@ OWSPart: () = {
 
 extern {
     type Location = usize;
-    type Error = CookieLexerError;
+    type Error = LexerError;
 
     enum CookieToken {
         "cookie_octets" => CookieToken::CookieOctets,
