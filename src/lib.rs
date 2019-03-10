@@ -1,3 +1,7 @@
+#![cfg_attr(all(feature = "benchmarks", test), feature(test))]
+#[cfg(all(feature = "benchmarks", test))]
+pub(crate) extern crate test;
+
 #[macro_use]
 pub(crate) extern crate lalrpop_util;
 

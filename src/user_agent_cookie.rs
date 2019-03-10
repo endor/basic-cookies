@@ -603,3 +603,61 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(feature = "benchmarks", test))]
+mod benchmarks {
+    use super::UserAgentCookie;
+    use crate::test::Bencher;
+
+    #[bench]
+    fn bench_parse_single_cookie(b: &mut Bencher) {
+        b.iter(|| UserAgentCookie::parse("test=1234"))
+    }
+
+    #[bench]
+    fn bench_parse_single_cookie_quoted(b: &mut Bencher) {
+        b.iter(|| UserAgentCookie::parse("test=\"1234\""))
+    }
+
+    #[bench]
+    fn bench_parse_multiple_cookies(b: &mut Bencher) {
+        b.iter(|| {
+            UserAgentCookie::parse("test0=1234; test1=abcde; test2=xxxxx; test3=\"987654321\"")
+        })
+    }
+
+    #[bench]
+    fn emit(b: &mut Bencher) {
+        b.iter(|| UserAgentCookie::new("test", "1234").emit())
+    }
+
+    #[bench]
+    fn emit_all_single_cookie(b: &mut Bencher) {
+        b.iter(|| {
+            UserAgentCookie::emit_all(&vec![UserAgentCookie {
+                name: "test0",
+                value: "\"123\"",
+            }])
+        })
+    }
+
+    #[bench]
+    fn emit_all_multiple_cookies(b: &mut Bencher) {
+        b.iter(|| {
+            UserAgentCookie::emit_all(&vec![
+                UserAgentCookie {
+                    name: "test0",
+                    value: "\"123\"",
+                },
+                UserAgentCookie {
+                    name: "test1",
+                    value: "abcde",
+                },
+                UserAgentCookie {
+                    name: "test2",
+                    value: "testvalue",
+                },
+            ])
+        })
+    }
+}

@@ -20,3 +20,6 @@ travis-ci = { repository = "drjokepu/basic-cookies", branch = "master" }
 
 [build-dependencies]
 "lalrpop" = "0.16"
+
+[features]
+benchmarks = []
