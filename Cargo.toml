@@ -14,12 +14,5 @@ edition = "2018"
 [badges]
 travis-ci = { repository = "drjokepu/basic-cookies", branch = "master" }
 
-[dependencies]
-"lalrpop-util" = "0.16"
-"regex" = "1.1"
-
-[build-dependencies]
-"lalrpop" = "0.16"
-
 [features]
 benchmarks = []

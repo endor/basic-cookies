@@ -1,10 +1,14 @@
 use crate::{
-    CharTokenClass, CookieLexer, EmitCookieError, EncodingError, EncodingErrorExpectedClass,
-    ParseCookieError,
+    EmitCookieError, EncodingError, EncodingErrorExpectedClass, ScanCharResult,
+    ScanUntilCharResult, StringScanner,
 };
 
-#[allow(dead_code)]
-lalrpop_mod!(cookie_grammar, "/user_agent_cookie_grammar.rs");
+#[cfg_attr(test, derive(Debug, PartialEq))]
+enum ParseNameResult<'a> {
+    Name(&'a str),
+    Value(&'a str),
+    None,
+}
 
 /// A cookie suitable to be sent from a user agent to a server, as described in [Section 4.2 of RFC 6265](https://tools.ietf.org/html/rfc6265.html#section-4.2).
 ///
@@ -17,7 +21,7 @@ lalrpop_mod!(cookie_grammar, "/user_agent_cookie_grammar.rs");
 /// let cookie_string = UserAgentCookie::emit_all(&vec![new_cookie_0, new_cookie_1]).unwrap();
 /// assert_eq!("key0=value0; key1=value1", &cookie_string);
 ///
-/// let parsed_cookies = UserAgentCookie::parse(&cookie_string).unwrap();
+/// let parsed_cookies = UserAgentCookie::parse(&cookie_string);
 /// assert_eq!("key0", parsed_cookies[0].get_name());
 /// assert_eq!("value0", parsed_cookies[0].get_value());
 /// assert_eq!("key1", parsed_cookies[1].get_name());
@@ -54,7 +58,7 @@ impl<'a> UserAgentCookie<'a> {
     /// ```
     /// use basic_cookies::UserAgentCookie;
     ///
-    /// let parsed_cookies = UserAgentCookie::parse("cookie1=value1; cookie2=value2").unwrap();
+    /// let parsed_cookies = UserAgentCookie::parse("cookie1=value1; cookie2=value2");
     ///
     /// assert_eq!("cookie1", parsed_cookies[0].get_name());
     /// assert_eq!("value1", parsed_cookies[0].get_value());
@@ -62,13 +66,78 @@ impl<'a> UserAgentCookie<'a> {
     /// assert_eq!("cookie2", parsed_cookies[1].get_name());
     /// assert_eq!("value2", parsed_cookies[1].get_value());
     /// ```
-    pub fn parse(input: &'a str) -> Result<Vec<UserAgentCookie<'a>>, ParseCookieError> {
-        Ok(cookie_grammar::CookiesParser::new()
-            .parse(CookieLexer::new(input))
-            .map_err(ParseCookieError::from_lalrpop_error)?
-            .iter()
-            .map(|tok| tok.with_str(input))
-            .collect::<Result<Vec<UserAgentCookie>, ParseCookieError>>()?)
+    pub fn parse(input: &'a str) -> Vec<UserAgentCookie<'a>> {
+        let mut results = Vec::new();
+        let mut scanner = StringScanner::from_str(input);
+
+        loop {
+            match UserAgentCookie::parse_name(&mut scanner) {
+                ParseNameResult::Name(name) => match UserAgentCookie::parse_value(&mut scanner) {
+                    Some(val) => results.push(UserAgentCookie::new(name, val)),
+                    None => {
+                        results.push(UserAgentCookie::new(name, ""));
+                        break;
+                    }
+                },
+                ParseNameResult::Value(val) => results.push(UserAgentCookie::new("", val)),
+                ParseNameResult::None => break,
+            };
+        }
+
+        results
+    }
+
+    fn parse_name<'input>(scanner: &mut StringScanner<'input>) -> ParseNameResult<'input> {
+        scanner.scan_whitespace_repeating();
+        if scanner.is_at_end_of_string() {
+            return ParseNameResult::None;
+        }
+
+        let start_idx = scanner.get_cursor();
+
+        match scanner.scan_until_char('=') {
+            ScanUntilCharResult::CharFound => {
+                let end_idx = scanner.get_cursor();
+                ParseNameResult::Name(scanner.substring(start_idx, end_idx))
+            }
+            ScanUntilCharResult::EndOfStringReached => {
+                ParseNameResult::Value(scanner.substring(start_idx, scanner.get_cursor()))
+            }
+        }
+    }
+
+    fn parse_value<'input>(scanner: &mut StringScanner<'input>) -> Option<&'input str> {
+        scanner.scan_char_once('=');
+        let starts_with_dquote = match scanner.scan_char_once('"') {
+            ScanCharResult::CharFound(_) => true,
+            _ => false,
+        };
+
+        let start_idx = scanner.get_cursor();
+
+        match if starts_with_dquote {
+            scanner.scan_until_char('"')
+        } else {
+            scanner.scan_until_char_or_whitespace(';')
+        } {
+            ScanUntilCharResult::CharFound => {
+                let end_idx = scanner.get_cursor();
+
+                if starts_with_dquote {
+                    scanner.scan_char_once('"');
+                }
+
+                scanner.scan_char_once(';');
+                Some(scanner.substring(start_idx, end_idx))
+            }
+            ScanUntilCharResult::EndOfStringReached => {
+                if scanner.get_cursor() > start_idx {
+                    Some(scanner.substring(start_idx, scanner.get_cursor()))
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     /// Gets the name of the cookie.
@@ -78,7 +147,7 @@ impl<'a> UserAgentCookie<'a> {
     /// ```
     /// use basic_cookies::UserAgentCookie;
     ///
-    /// let parsed_cookies = UserAgentCookie::parse("name=value").unwrap();
+    /// let parsed_cookies = UserAgentCookie::parse("name=value");
     /// assert_eq!("name", parsed_cookies[0].get_name());
     /// ```
     pub fn get_name(&self) -> &'a str {
@@ -92,7 +161,7 @@ impl<'a> UserAgentCookie<'a> {
     /// ```
     /// use basic_cookies::UserAgentCookie;
     ///
-    /// let parsed_cookies = UserAgentCookie::parse("name=value").unwrap();
+    /// let parsed_cookies = UserAgentCookie::parse("name=value");
     /// assert_eq!("value", parsed_cookies[0].get_value());
     /// ```
     pub fn get_value(&self) -> &'a str {
@@ -167,72 +236,61 @@ impl<'b, 'a: 'b> UserAgentCookie<'a> {
 }
 
 fn is_str_all_tokens(val: &str) -> bool {
-    val.chars().all(CharTokenClass::is_token_char)
+    val.chars().all(is_token_char)
 }
 
 fn is_str_all_cookie_octets(val: &str) -> bool {
-    val.chars().all(CharTokenClass::is_cookie_octet)
+    val.chars().all(is_cookie_octet)
 }
 
-mod terminals {
-    use super::nonterminals::NonTerminalSpan;
-    use super::ParseCookieError;
-    use super::UserAgentCookie;
-
-    #[derive(Clone, Debug)]
-    pub struct Cookie {
-        pub(super) key: NonTerminalSpan,
-        pub(super) value: NonTerminalSpan,
-    }
-
-    impl Cookie {
-        pub(super) fn with_str<'a>(
-            &self,
-            data: &'a str,
-        ) -> Result<UserAgentCookie<'a>, ParseCookieError> {
-            Ok(UserAgentCookie::new(
-                self.key
-                    .as_str(data)
-                    .map_err(ParseCookieError::from_internal_error)?,
-                self.value
-                    .as_str(data)
-                    .map_err(ParseCookieError::from_internal_error)?,
-            ))
-        }
+fn is_token_char(c: char) -> bool {
+    match c {
+        '\x21'
+        | '\x23'...'\x27'
+        | '\x2a'
+        | '\x2b'
+        | '\x2d'
+        | '\x2e'
+        | '\x30'...'\x39'
+        | '\x41'...'\x5a'
+        | '\x5e'...'\x7a'
+        | '\x7c'
+        | '\x7e' => true,
+        _ => false,
     }
 }
 
-mod nonterminals {
-    use crate::{InternalError, InternalErrorKind};
-
-    #[derive(Clone, Debug)]
-    pub struct NonTerminalSpan {
-        start: usize,
-        end: usize,
-    }
-
-    impl NonTerminalSpan {
-        pub(crate) fn new(start: usize, end: usize) -> NonTerminalSpan {
-            NonTerminalSpan {
-                start: start,
-                end: end,
-            }
-        }
-
-        pub(crate) fn as_str<'a>(&self, data: &'a str) -> Result<&'a str, InternalError> {
-            match data.get(self.start..self.end) {
-                Some(res) => Ok(res),
-                None => Err(InternalError::new(
-                    InternalErrorKind::NonTerminalIndexBeyondBoundaries,
-                )),
-            }
-        }
+pub fn is_cookie_octet(c: char) -> bool {
+    match c {
+        '\x21'
+        | '\x23'...'\x27'
+        | '\x2a'
+        | '\x2b'
+        | '\x2d'
+        | '\x2e'
+        | '\x30'...'\x39'
+        | '\x41'...'\x5a'
+        | '\x5e'...'\x7a'
+        | '\x7c'
+        | '\x7e'
+        | '\x28'
+        | '\x29'
+        | '\x2f'
+        | '\x3a'
+        | '\x3c'
+        | '\x3e'...'\x40'
+        | '\x5b'
+        | '\x5d'
+        | '\x7b'
+        | '\x7d' => true,
+        _ => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_str_all_cookie_octets, is_str_all_tokens, UserAgentCookie};
+    use super::{is_str_all_cookie_octets, is_str_all_tokens, ParseNameResult, UserAgentCookie};
+    use crate::StringScanner;
 
     #[test]
     fn get_name() {
@@ -257,7 +315,7 @@ mod tests {
     #[test]
     fn single_cookie() {
         const COOKIE_STR: &'static str = "test=1234";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -268,7 +326,7 @@ mod tests {
     #[test]
     fn single_cookie_quoted() {
         const COOKIE_STR: &'static str = "quoted_test=\"quotedval\"";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -276,10 +334,24 @@ mod tests {
         assert_eq!("quotedval", parsed_cookie.value);
     }
 
+    // technically this is not compatible with RFC 6265, but it is
+    // compatible with the earlier RFC 2109 and it's somewhat common,
+    // not sure if this is an oversight or not
+    #[test]
+    fn single_cookie_quoted_with_space() {
+        const COOKIE_STR: &'static str = "quoted_test=\"quoted val\"";
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
+        assert_eq!(1, parsed_cookies.len());
+
+        let parsed_cookie = &parsed_cookies[0];
+        assert_eq!("quoted_test", parsed_cookie.name);
+        assert_eq!("quoted val", parsed_cookie.value);
+    }
+
     #[test]
     fn single_cookie_with_equals_in_value() {
         const COOKIE_STR: &'static str = "test=abc=123";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -290,7 +362,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_before() {
         const COOKIE_STR: &'static str = " \x09 ztest=9876";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -301,7 +373,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_with_single_space_before() {
         const COOKIE_STR: &'static str = " qtest=9878";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -312,7 +384,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_after() {
         const COOKIE_STR: &'static str = "abcde=77766test \x09\x09    ";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -323,7 +395,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_with_single_space_after() {
         const COOKIE_STR: &'static str = "xyzzz=test3 ";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -334,7 +406,7 @@ mod tests {
     #[test]
     fn single_cookie_ows_before_and_after() {
         const COOKIE_STR: &'static str = " \x09 ztest=9876       ";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -345,7 +417,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name() {
         const COOKIE_STR: &'static str = "=nokey";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -356,7 +428,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name_with_ows_before() {
         const COOKIE_STR: &'static str = " =nokey";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -367,7 +439,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_value() {
         const COOKIE_STR: &'static str = "noval=";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -378,7 +450,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_value_with_ows_after() {
         const COOKIE_STR: &'static str = "noval= ";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -389,7 +461,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name_and_val() {
         const COOKIE_STR: &'static str = "=";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -400,7 +472,7 @@ mod tests {
     #[test]
     fn single_cookie_empty_name_no_equals() {
         const COOKIE_STR: &'static str = "nokey";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(1, parsed_cookies.len());
 
         let parsed_cookie = &parsed_cookies[0];
@@ -411,7 +483,7 @@ mod tests {
     #[test]
     fn two_cookies() {
         const COOKIE_STR: &'static str = "test1=01234; test2=testval";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(2, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -426,7 +498,7 @@ mod tests {
     #[test]
     fn three_cookies() {
         const COOKIE_STR: &'static str = "test1=0x1234; test2=test2; third_val=v4lue";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -445,7 +517,7 @@ mod tests {
     #[test]
     fn three_cookies_ows_before() {
         const COOKIE_STR: &'static str = " test1=0x1234; test2=test2; third_val=v4lue";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -464,7 +536,7 @@ mod tests {
     #[test]
     fn three_cookies_ows_after() {
         const COOKIE_STR: &'static str = "test1=0x1234; test2=test2; third_val=v4lue   ";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -483,7 +555,7 @@ mod tests {
     #[test]
     fn three_cookies_ows_before_and_after() {
         const COOKIE_STR: &'static str = "   test1=0x1234; test2=test2; third_val=v4lue ";
-        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR).unwrap();
+        let parsed_cookies = UserAgentCookie::parse(COOKIE_STR);
         assert_eq!(3, parsed_cookies.len());
 
         let parsed_cookie_0 = &parsed_cookies[0];
@@ -497,6 +569,69 @@ mod tests {
         let parsed_cookie_2 = &parsed_cookies[2];
         assert_eq!("third_val", parsed_cookie_2.name);
         assert_eq!("v4lue", parsed_cookie_2.value);
+    }
+
+    #[test]
+    fn parse_name_single() {
+        let mut scanner = StringScanner::from_str("name=value");
+        let result = UserAgentCookie::parse_name(&mut scanner);
+        assert_eq!(ParseNameResult::Name("name"), result);
+    }
+
+    #[test]
+    fn parse_name_multiple() {
+        let mut scanner = StringScanner::from_str("name0=value0; name1=value1");
+        let result = UserAgentCookie::parse_name(&mut scanner);
+        assert_eq!(ParseNameResult::Name("name0"), result);
+    }
+
+    #[test]
+    fn parse_name_value_only() {
+        let mut scanner = StringScanner::from_str("value0");
+        let result = UserAgentCookie::parse_name(&mut scanner);
+        assert_eq!(ParseNameResult::Value("value0"), result);
+    }
+
+    #[test]
+    fn parse_name_empty_name() {
+        let mut scanner = StringScanner::from_str("=value");
+        let result = UserAgentCookie::parse_name(&mut scanner);
+        assert_eq!(ParseNameResult::Name(""), result);
+    }
+
+    #[test]
+    fn parse_name_empty_str() {
+        let mut scanner = StringScanner::from_str("");
+        let result = UserAgentCookie::parse_name(&mut scanner);
+        assert_eq!(ParseNameResult::None, result);
+    }
+
+    #[test]
+    fn parse_value_single_with_eq() {
+        let mut scanner = StringScanner::from_str("=value");
+        let result = UserAgentCookie::parse_value(&mut scanner);
+        assert_eq!(Some("value"), result);
+    }
+
+    #[test]
+    fn parse_value_single_without_eq() {
+        let mut scanner = StringScanner::from_str("=value");
+        let result = UserAgentCookie::parse_value(&mut scanner);
+        assert_eq!(Some("value"), result);
+    }
+
+    #[test]
+    fn parse_value_multiple() {
+        let mut scanner = StringScanner::from_str("=value0; name1=value1; name2=value2");
+        let result = UserAgentCookie::parse_value(&mut scanner);
+        assert_eq!(Some("value0"), result);
+    }
+
+    #[test]
+    fn parse_value_empty_str() {
+        let mut scanner = StringScanner::from_str("");
+        let result = UserAgentCookie::parse_value(&mut scanner);
+        assert_eq!(None, result);
     }
 
     #[test]
@@ -601,6 +736,96 @@ mod tests {
             .is_err(),
             "EncodingError expected but result was successful."
         );
+    }
+
+    #[cfg(test)]
+    mod is_token_char {
+        use super::super::is_token_char;
+
+        #[test]
+        fn x00() {
+            assert_eq!(false, is_token_char('\x00'));
+        }
+
+        #[test]
+        fn x21() {
+            assert_eq!(true, is_token_char('\x21'));
+        }
+
+        #[test]
+        fn x22() {
+            assert_eq!(false, is_token_char('\x22'));
+        }
+
+        #[test]
+        fn x23() {
+            assert_eq!(true, is_token_char('\x23'));
+        }
+
+        #[test]
+        fn x28() {
+            assert_eq!(false, is_token_char('\x28'));
+        }
+
+        #[test]
+        fn x3d() {
+            assert_eq!(false, is_token_char('\x3d'));
+        }
+
+        #[test]
+        fn x3e() {
+            assert_eq!(false, is_token_char('\x3e'));
+        }
+
+        #[test]
+        fn x7f() {
+            assert_eq!(false, is_token_char('\x7f'));
+        }
+    }
+
+    #[cfg(test)]
+    mod is_cookie_octet {
+        use super::super::is_cookie_octet;
+
+        #[test]
+        fn x00() {
+            assert_eq!(false, is_cookie_octet('\x00'));
+        }
+
+        #[test]
+        fn x21() {
+            assert_eq!(true, is_cookie_octet('\x21'));
+        }
+
+        #[test]
+        fn x22() {
+            assert_eq!(false, is_cookie_octet('\x22'));
+        }
+
+        #[test]
+        fn x23() {
+            assert_eq!(true, is_cookie_octet('\x23'));
+        }
+
+        #[test]
+        fn x28() {
+            assert_eq!(true, is_cookie_octet('\x28'));
+        }
+
+        #[test]
+        fn x3d() {
+            assert_eq!(false, is_cookie_octet('\x3d'));
+        }
+
+        #[test]
+        fn x3e() {
+            assert_eq!(true, is_cookie_octet('\x3e'));
+        }
+
+        #[test]
+        fn x7f() {
+            assert_eq!(false, is_cookie_octet('\x7f'));
+        }
     }
 }
 
